@@ -1,0 +1,1 @@
+{"mcpServers": {"vscode": {"command": "python3", "args": ["/path/to/snapgent-bridge-linux/vscode_mcp.py"], "env": {"APPDATA": "/home/YOURUSER/.config"}}}}
