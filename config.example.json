@@ -1,1 +1,4 @@
-{"mcpServers": {"vscode": {"command": "python3", "args": ["/path/to/snapgent-bridge-linux/vscode_mcp.py"], "env": {"APPDATA": "/home/YOURUSER/.config"}}}}
+{"mcpServers": {
+  "vscode": {"command": "python3", "args": ["/path/to/snapgent-bridge-linux/vscode_mcp.py"], "env": {"APPDATA": "/home/YOURUSER/.config"}},
+  "android-studio": {"url": "http://127.0.0.1:64342/sse"}
+}}

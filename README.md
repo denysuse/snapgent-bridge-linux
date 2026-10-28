@@ -2,7 +2,7 @@
 
 **Bridge Python untuk [Snapgent](https://github.com/herdodp/snapgent-connector) di Linux** — menghubungkan chat AI web gratis (DeepSeek, Claude, Gemini, ChatGPT, dll.) ke VS Code lewat MCP, tanpa API key.
 
-> English summary: The upstream Snapgent repo ships only a Windows `bridge.exe`; the `bridge.py` its macOS launcher references was never published. This repo re-implements that bridge in Python from the extension's open protocol, so Snapgent works on Linux today. Tested end-to-end.
+> English summary: The upstream Snapgent repo ships only a Windows `bridge.exe`; the `bridge.py` its macOS launcher references was never published. This repo re-implements that bridge in Python from the extension's open protocol, so Snapgent works on Linux today. Since v0.2 the bridge serves **every** MCP server in `config.json` at once — stdio servers and HTTP servers (legacy SSE / Streamable HTTP) — which includes the MCP Server built into JetBrains IDEs (Android Studio, IntelliJ, ...) since 2025.2. Tested end-to-end.
 
 ## Kenapa repo ini ada
 
@@ -22,11 +22,16 @@ Repo ini menambal lubang itu: `bridge.py` di sini adalah implementasi ulang yang
 Chat AI (browser) ⇄ Ekstensi Snapgent ⇄ WebSocket :17613 ⇄ bridge.py ⇄ stdio JSON-RPC (MCP) ⇄ vscode_mcp.py ⇄ folder proyek VS Code
 ```
 
-Bridge membaca `config.json` (format sama seperti yang ditulis `setup-config.ps1` versi Windows):
+Bridge membaca `config.json` (format sama seperti yang ditulis `setup-config.ps1` versi Windows) dan melayani **semua** server di dalamnya sekaligus:
 
 ```json
-{"mcpServers": {"vscode": {"command": "python3", "args": ["/path/to/vscode_mcp.py"], "env": {"APPDATA": "/home/user/.config"}}}}
+{"mcpServers": {
+  "vscode": {"command": "python3", "args": ["/path/to/vscode_mcp.py"], "env": {"APPDATA": "/home/user/.config"}},
+  "android-studio": {"url": "http://127.0.0.1:64342/sse"}
+}}
 ```
+
+Entri berkunci `command` dijalankan sebagai proses MCP stdio; entri berkunci `url` diajak bicara lewat HTTP — transport SSE lama bila URL berakhiran `/sse`, Streamable HTTP selain itu. Katalog tool digabung dan setiap tool ditandai server asalnya; bila dua server punya tool bernama sama, salinan server berikutnya diiklankan dengan awalan `nama-server/` (konvensi proyek hulu), dan pemanggilan boleh memakai nama polos (diarahkan ke pemilik pertama) atau nama berawalan itu.
 
 **Trik Linux yang penting:** `vscode_mcp.py` mencari workspace aktif VS Code dari `%APPDATA%\Code\User\globalStorage\storage.json` — jalur khas Windows. VS Code di Linux menyimpan berkas yang sama persis di `~/.config/Code/User/globalStorage/storage.json`, jadi cukup arahkan env `APPDATA` ke `$HOME/.config` dan deteksi workspace berjalan tanpa mengubah satu baris pun dari kode resmi.
 
@@ -34,7 +39,7 @@ Bridge membaca `config.json` (format sama seperti yang ditulis `setup-config.ps1
 
 | Berkas | Keterangan |
 | --- | --- |
-| `bridge.py` | Bridge Linux (baru, ditulis untuk repo ini). Satu-satunya dependensi: `websockets`. |
+| `bridge.py` | Bridge Linux v0.2 (baru, ditulis untuk repo ini): multi-server stdio + SSE + Streamable HTTP. Satu-satunya dependensi: `websockets`. |
 | `vscode_mcp.py` | Server MCP VS Code **resmi dari proyek Snapgent**, tanpa diubah. |
 | `start-linux.sh` | Peluncur: membuat `.venv`, memasang `websockets`, menulis `config.json`, menjalankan bridge. |
 | `test_linux_bridge.py` | Uji asap mandiri: bridge + MCP + operasi berkas nyata di workspace sementara. |
@@ -58,12 +63,25 @@ python3 -m venv .venv && .venv/bin/pip install websockets
 .venv/bin/python test_linux_bridge.py
 ```
 
-Hasil uji 28 Okt 2026 (Linux, Python 3.12): **semua pemeriksaan lulus** — sapaan bridge memuat 24 tool, dan perintah `create_file` / `read_file` / `edit_file` / `run_command` yang dikirim lewat WebSocket (sebagaimana ekstensi mengirimnya) benar-benar terjadi di berkas workspace. Unit test bawaan `vscode_mcp.py` dari proyek resmi juga lulus 4/4.
+Hasil uji 28 Okt 2026 (Linux, Python 3.12): **27/27 pemeriksaan lulus**. Skenario 1 (regresi satu server): sapaan bridge memuat 24 tool, dan perintah `create_file` / `read_file` / `edit_file` / `run_command` yang dikirim lewat WebSocket (sebagaimana ekstensi mengirimnya) benar-benar terjadi di berkas workspace. Skenario 2 (tiga server sekaligus): server VS Code (stdio) + dua server tiruan JetBrains (Streamable HTTP dan SSE) — katalog gabungan 30 tool, tabrakan nama teratasi dengan awalan server, pemanggilan tool run configuration IDE sampai ke server yang benar, tambah/hapus server saat bridge berjalan tersimpan ke `config.json`. Unit test bawaan `vscode_mcp.py` dari proyek resmi juga lulus 4/4.
+
+## Android Studio & IDE JetBrains lain
+
+Android Studio (dan IntelliJ IDEA, PyCharm, WebStorm, ...) sejak versi 2025.2 membawa MCP Server bawaan — artinya AI bisa bekerja lewat IDE-nya langsung: inspeksi kode, refactor ganti nama semantik, menjalankan run configuration, dan perintah terminal di dalam IDE.
+
+1. Di Android Studio: **Settings → Tools → MCP Server** → centang **Enable MCP Server**. (Opsional: aktifkan juga *brave mode* di bagian Command execution bila AI boleh menjalankan perintah/run configuration tanpa konfirmasi setiap kali.)
+2. Masih di halaman yang sama, pada **Manual Client Configuration** klik **Copy SSE Config** atau **Copy HTTP Stream Config** — isinya URL server IDE kamu, mis. `http://127.0.0.1:64342/sse`.
+3. Tambahkan sebagai entri `url` di `config.json` bridge (lihat contoh di atas; nama entri bebas, mis. `android-studio`), lalu restart bridge — atau tambahkan langsung dari UI ekstensi; bridge menyimpan perubahan ke `config.json`.
+4. Di bar Snapgent pada tab chat, pilih target `android-studio`. Tool-tool IDE akan tampil di katalog perintah.
+
+Catatan: jalur ini teruji terhadap server MCP tiruan yang setia pada protokol SSE & Streamable HTTP (lihat berkas test) — bukan terhadap Android Studio asli. Laporkan isu bila perilaku IDE aslimu berbeda.
+
+Jalur yang selalu tersedia tanpa syarat versi IDE: buka folder proyek Android yang sama sebagai workspace (lewat server `vscode`), dan AI mengedit berkas di disk serta menjalankan build `./gradlew` lewat tool perintah — Android Studio memuat ulang perubahan berkas dari luar secara otomatis.
 
 ## Batasan
 
-- Bridge ini melayani satu server MCP (`vscode`). Pesan `add_server`/`remove_server` dari ekstensi dijawab "tidak didukung" — ubah `config.json` lalu restart bridge.
 - Target Roblox Studio tidak didukung (khusus Windows).
+- URL MCP hanya `http://` (server IDE lokal memang HTTP); `https://` belum didukung.
 - Bridge hanya mendengarkan di `127.0.0.1`.
 
 ## Keamanan
